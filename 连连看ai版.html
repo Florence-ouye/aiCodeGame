@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+    /* 新增居中布局样式 */
+    body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        margin: 0;
+    }
+    .game-container {
+        display: grid;
+        grid-template-columns: repeat(12, 50px);
+        gap: 5px;
+        padding: 20px;
+        margin: auto; /* 新增自动外边距 */
+    }
+    .cell {
+        width: 40px;
+        height: 40px;
+        border: 2px solid #333;
+        border-radius: 5px;
+        margin: 2px;
+        cursor: pointer;
+        transition: all 0.3s;
+        box-sizing: border-box;
+        clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    }
+    .cell:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 12px rgba(0,0,0,0.3);
+        z-index: 1;
+    }
+    .selected {
+        border: 3px solid red;
+        /* 新增选中效果 */
+        transform: scale(1.15);
+        box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+        z-index: 2;
+        animation: pulse 1s infinite alternate;
+    }
+    .line {
+        position: absolute;
+        background: linear-gradient(to right, #ff0000, #ff6b6b);
+        pointer-events: none;
+        height: 4px;
+        border-radius: 2px;
+        transition: all 0.3s;
+        box-shadow: 0 0 10px rgba(255,0,0,0.3);
+    }
+    .cell.shape-0 { clip-path: circle(50%); }
+    .cell.shape-1 { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+    .cell.shape-2 { clip-path: polygon(50% 0%, 100% 100%, 0% 100%); }
+    .cell.shape-3 { clip-path: polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%); }
+    /* 新增脉冲动画 */
+    @keyframes pulse {
+        from {
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
+        }
+        to {
+            box-shadow: 0 0 25px rgba(255, 0, 0, 0.7);
+        }
+    }
+    </style>
+</head>
+<body>
+    <div id="board" class="game-container"></div>
+    <script>
+    const ROWS = 8;
+    const COLS = 12;
+    const ICON_TYPES = 24;
+    const COLOR_STEP = 15; // 色相步长（360/24=15）
+    let board = [];
+    let selected = [];
+
+    function initBoard() {
+        // 生成可解棋盘的新逻辑
+        let pairs = [];
+        const totalPairs = (ROWS * COLS) / 4; // 每个图标需要4个实例
+        
+        // 生成对称配对
+        for(let i=0; i<totalPairs; i++) {
+            const icon = Math.floor(i / (ROWS*COLS/4/ICON_TYPES)) % ICON_TYPES;
+            // 每个图标生成4个对称位置
+            pairs.push(icon, icon, icon, icon);
+        }
+        
+        // 创建对称布局
+        let positions = [];
+        for(let r=0; r<ROWS; r++) {
+            for(let c=0; c<COLS/2; c++) {
+                // 生成镜像对称位置
+                positions.push([r, c], [r, COLS-1 - c]);
+            }
+        }
+        
+        // 打乱位置但保持对称性
+        for(let i=positions.length-1; i>0; i--) {
+            const j = Math.floor(Math.random()*(i+1));
+            [positions[i], positions[j]] = [positions[j], positions[i]];
+        }
+        
+        // 填充棋盘
+        board = Array(ROWS).fill().map(() => Array(COLS).fill(null));
+        pairs.forEach((icon, index) => {
+            const [row, col] = positions[index];
+            board[row][col] = icon;
+        });
+
+        // 最后随机旋转棋盘增加变化
+        if(Math.random() > 0.5) board = board.reverse(); // 垂直翻转
+        if(Math.random() > 0.5) board = board.map(row => [...row.reverse()]); // 水平翻转
+        
+        renderBoard();
+    }
+
+    function renderBoard() {
+        const container = document.getElementById('board');
+        container.innerHTML = '';
+        
+        board.forEach((row, i) => {
+            row.forEach((icon, j) => {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                
+                if (icon !== null) {
+                    // 修改颜色生成方式并添加形状类
+                    const hue = icon * COLOR_STEP;
+                    cell.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
+                    cell.style.borderColor = `hsl(${hue}, 70%, 30%)`;
+                    cell.classList.add(`shape-${icon % 4}`); // 4种基础形状
+                    cell.dataset.icon = icon;
+                } else {
+                    cell.style.backgroundColor = '#fff';
+                }
+                
+                cell.addEventListener('click', () => handleClick(i, j));
+                container.appendChild(cell);
+            });
+        });
+    }
+
+    function handleClick(row, col) {
+        if(board[row][col] === null) return;
+        
+        // 修复1：防止重复点击同一个格子
+        if(selected.length === 1 && 
+           selected[0].row === row && 
+           selected[0].col === col) {
+            clearSelection();
+            return;
+        }
+
+        // 修复2：更新选中状态逻辑
+        const cell = document.getElementsByClassName('cell')[row*COLS + col];
+        if(selected.length < 2) {
+            cell.classList.add('selected');
+            selected.push({row, col});
+        }
+
+        if(selected.length === 2) {
+            checkConnection();
+        }
+    }
+
+    function checkConnection() {
+        const [a, b] = selected;
+        if(board[a.row][a.col] !== board[b.row][b.col]) {
+            clearSelection();
+            return;
+        }
+
+        if(checkStraight(a, b) || checkOneCorner(a, b) || checkTwoCorners(a, b)) {
+            drawConnectionLine(a, b);
+            setTimeout(() => {
+                removeIcons(a, b);
+                checkWin();
+            }, 300);
+        } else {
+            clearSelection();
+        }
+    }
+
+    // 修复后的直线检测
+    function checkStraight(a, b) {
+        if(a.row === b.row) { // 水平
+            const minCol = Math.min(a.col, b.col);
+            const maxCol = Math.max(a.col, b.col);
+            for(let c=minCol+1; c<maxCol; c++) {
+                if(board[a.row][c] !== null) return false;
+            }
+            return true;
+        }
+        if(a.col === b.col) { // 垂直
+            const minRow = Math.min(a.row, b.row);
+            const maxRow = Math.max(a.row, b.row);
+            for(let r=minRow+1; r<maxRow; r++) {
+                if(board[r][a.col] !== null) return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // 修复后的单拐点检测
+    function checkOneCorner(a, b) {
+        const c1 = {row: a.row, col: b.col};
+        const c2 = {row: b.row, col: a.col};
+        
+        // 新增拐点位置有效性检查
+        const checkValidCorner = (corner) => {
+            return board[corner.row][corner.col] === null;
+        };
+
+        return (checkPath(a, c1) && checkPath(c1, b) && checkValidCorner(c1)) ||
+               (checkPath(a, c2) && checkPath(c2, b) && checkValidCorner(c2));
+    }
+
+    // 通用路径检测
+    function checkPath(start, end) {
+        if(start.row === end.row) return checkStraight(start, end);
+        if(start.col === end.col) return checkStraight(start, end);
+        return false;
+    }
+
+    // 修复后的双拐点检测
+    function checkTwoCorners(a, b) {
+        // 水平扫描
+        for(let c=0; c<COLS; c++) {
+            if(c === a.col || c === b.col) continue;
+            // 新增边界检查
+            if(c < 0 || c >= COLS) continue;
+            
+            const verticalPathClear = (col) => {
+                const minRow = Math.max(0, Math.min(a.row, b.row));
+                const maxRow = Math.min(ROWS-1, Math.max(a.row, b.row));
+                for(let r=minRow; r<=maxRow; r++) {
+                    if(r !== a.row && r !== b.row && board[r][col] !== null) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            
+            if(board[a.row][c] === null && 
+               board[b.row][c] === null &&
+               checkStraight(a, {row: a.row, col: c}) &&
+               checkStraight(b, {row: b.row, col: c}) &&
+               verticalPathClear(c)) {
+                return true;
+            }
+        }
+        
+        // 垂直扫描
+        for(let r=0; r<ROWS; r++) {
+            if(r === a.row || r === b.row) continue;
+            // 新增边界检查
+            if(r < 0 || r >= ROWS) continue;
+            
+            const horizontalPathClear = (row) => {
+                const minCol = Math.max(0, Math.min(a.col, b.col));
+                const maxCol = Math.min(COLS-1, Math.max(a.col, b.col));
+                for(let c=minCol; c<=maxCol; c++) {
+                    if(c !== a.col && c !== b.col && board[row][c] !== null) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            
+            if(board[r][a.col] === null && 
+               board[r][b.col] === null &&
+               checkStraight(a, {row: r, col: a.col}) &&
+               checkStraight(b, {row: r, col: b.col}) &&
+               horizontalPathClear(r)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    // 新增清除选中状态函数
+    function clearSelection() {
+        selected.forEach(pos => {
+            const index = pos.row * COLS + pos.col;
+            const cells = document.getElementsByClassName('cell');
+            if (cells[index]) { // 添加存在性检查
+                cells[index].classList.remove('selected');
+            }
+        });
+        selected = [];
+    }
+
+    // 新增图标消除函数
+    function removeIcons(a, b) {
+        board[a.row][a.col] = null;
+        board[b.row][b.col] = null;
+        clearSelection(); // 先清除选中状态再渲染
+        renderBoard();
+    }
+
+    // 新增胜利检测
+    function checkWin() {
+        const remaining = board.flat().filter(icon => icon !== null).length;
+        if(remaining === 0) {
+            alert('游戏胜利！');
+            initBoard();
+        }
+    }
+
+    // 新增连接线绘制（完整实现）
+    function drawConnectionLine(a, b) {
+        const container = document.getElementById('board');
+        const cells = document.getElementsByClassName('cell');
+        
+        // 获取两个单元格的位置
+        const rect1 = cells[a.row*COLS + a.col].getBoundingClientRect();
+        const rect2 = cells[b.row*COLS + b.col].getBoundingClientRect();
+        
+        // 计算中心点坐标（考虑滚动位置）
+        const x1 = rect1.left + rect1.width/2 + window.scrollX;
+        const y1 = rect1.top + rect1.height/2 + window.scrollY;
+        const x2 = rect2.left + rect2.width/2 + window.scrollX;
+        const y2 = rect2.top + rect2.height/2 + window.scrollY;
+        
+        // 计算连线的角度和长度
+        const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+        const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+        
+        // 创建连线元素
+        const line = document.createElement('div');
+        line.className = 'line';
+        line.style.width = `${length}px`;
+        line.style.left = `${x1}px`;
+        line.style.top = `${y1}px`;
+        line.style.transform = `rotate(${angle}deg)`;
+        line.style.transformOrigin = '0 50%';
+        
+        // 添加动态效果
+        line.style.opacity = '0';
+        setTimeout(() => line.style.opacity = '1', 10);
+        
+        document.body.appendChild(line); // 改为添加到body避免被棋盘容器裁剪
+        setTimeout(() => {
+            line.style.opacity = '0';
+            setTimeout(() => line.remove(), 300);
+        }, 300);
+    }
+
+    initBoard();
+    </script>
+</body>
+</html> 
